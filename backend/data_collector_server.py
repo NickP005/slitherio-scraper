@@ -46,6 +46,31 @@ CONFIG = {
 }
 
 # ===========================================
+# DATA COLLECTION PARAMETERS (served to clients)
+# ===========================================
+COLLECTION_CONFIG = {
+    # Grid configuration
+    'ANGULAR_BINS': 64,           # Number of angular bins
+    'RADIAL_BINS': 24,           # Number of radial bins
+    'ALPHA_WARP': 6.0,           # Angular warping factor for front density
+    'R_MIN': 60,                 # Minimum radius in game units
+    'R_MAX': 3200,               # Maximum radius in game units
+
+    # Sampling
+    'SAMPLE_RATE_HZ': 10,        # Data collection frequency (Hz)
+    'EMA_ALPHA': 0.05,           # Exponential moving average factor
+
+    # Normalization
+    'FOOD_NORM_FACTOR': 10.0,    # Food density normalization
+    'SNAKE_NORM_FACTOR': 5.0,    # Snake density normalization
+    'HEAD_WEIGHT': 3.0,          # Weight multiplier for enemy heads
+
+    # Debug
+    'DEBUG_LOG': True,           # Enable debug logging
+    'STATS_INTERVAL': 100,       # Frames between statistics logging
+}
+
+# ===========================================
 # LOGGING SETUP
 # ===========================================
 logging.basicConfig(
@@ -58,8 +83,10 @@ logger = logging.getLogger('slither-collector')
 # DATA MODELS
 # ===========================================
 class SessionData:
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, username: str = "unknown", client_ip: str = "unknown"):
         self.session_id = session_id
+        self.username = username
+        self.client_ip = client_ip
         self.start_time = time.time()
         self.last_frame_time = time.time()
         self.frame_count = 0
@@ -80,7 +107,7 @@ class SessionData:
             'game_radius': None
         }
 
-        logger.info(f"New session created: {session_id}")
+        logger.info(f"New session created: {session_id} for user {username} from {client_ip}")
 
     def is_expired(self, max_gap_seconds: float) -> bool:
         return (time.time() - self.last_frame_time) > max_gap_seconds
@@ -251,8 +278,23 @@ class SessionData:
 
     def _init_zarr_storage(self):
         """Initialize Zarr storage for this session"""
-        session_dir = CONFIG['DATA_DIR'] / f"session_{self.session_id}"
+        # Create user-specific directory structure: data/username/session_timestamp/
+        user_dir = CONFIG['DATA_DIR'] / self.username
+        session_dir = user_dir / f"session_{self.session_id}"
         session_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save session metadata
+        metadata_file = session_dir / "metadata.json"
+        metadata = {
+            "session_id": self.session_id,
+            "username": self.username,
+            "client_ip": self.client_ip,
+            "start_time": self.start_time,
+            "start_time_iso": datetime.fromtimestamp(self.start_time).isoformat(),
+            "config": COLLECTION_CONFIG
+        }
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
 
         self.zarr_store = zarr.DirectoryStore(str(session_dir))
         self.zarr_group = zarr.group(store=self.zarr_store, overwrite=False)
@@ -378,12 +420,22 @@ class DataCollectorServer:
             try:
                 data = await request.json()
                 session_id = data.get('sessionId')
+                username = data.get('username', 'unknown')
+                
+                # Get client IP
+                client_ip = request.client.host if request.client else 'unknown'
+                
+                # Check for forwarded IP headers (if behind proxy)
+                if 'x-forwarded-for' in request.headers:
+                    client_ip = request.headers['x-forwarded-for'].split(',')[0].strip()
+                elif 'x-real-ip' in request.headers:
+                    client_ip = request.headers['x-real-ip']
 
                 if not session_id:
                     raise HTTPException(status_code=400, detail="Missing sessionId")
 
-                # Get or create session
-                session = self.get_or_create_session(session_id)
+                # Get or create session with user info
+                session = self.get_or_create_session(session_id, username, client_ip)
 
                 # Add frame to session
                 should_flush = session.add_frame(data)
@@ -451,7 +503,18 @@ class DataCollectorServer:
             return {
                 "status": "healthy",
                 "active_sessions": len(self.sessions),
-                "data_dir": str(CONFIG['DATA_DIR'])
+                "data_dir": str(CONFIG['DATA_DIR']),
+                "config": COLLECTION_CONFIG
+            }
+
+        @self.app.get("/config")
+        async def get_collection_config():
+            """Get data collection configuration parameters"""
+            return {
+                "status": "ok",
+                "config": COLLECTION_CONFIG,
+                "server_version": "2.0.0",
+                "timestamp": time.time()
             }
 
         @self.app.get("/latest")
@@ -476,12 +539,12 @@ class DataCollectorServer:
             else:
                 raise HTTPException(status_code=404, detail="No recent data available")
 
-    def get_or_create_session(self, session_id: str) -> SessionData:
+    def get_or_create_session(self, session_id: str, username: str = "unknown", client_ip: str = "unknown") -> SessionData:
         """Get existing session or create new one"""
         if session_id in self.sessions:
             return self.sessions[session_id]
 
-        session = SessionData(session_id)
+        session = SessionData(session_id, username, client_ip)
         self.sessions[session_id] = session
         return session
 

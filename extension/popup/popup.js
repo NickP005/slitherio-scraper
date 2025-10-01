@@ -15,28 +15,28 @@ class PopupController {
         try {
             const settings = await chrome.storage.sync.get({
                 username: '',
-                host: 'http://127.0.0.1:5055',
-                sampleRate: '10',
-                alphaWarp: '6.0',
+                serverHost: 'http://127.0.0.1:5055',
                 autoStart: true,
                 debugMode: false
             });
             
             document.getElementById('username').value = settings.username;
-            document.getElementById('host').value = settings.host;
-            document.getElementById('sampleRate').value = settings.sampleRate;
-            document.getElementById('alphaWarp').value = settings.alphaWarp;
-            document.getElementById('autoStart').checked = settings.autoStart;
-            document.getElementById('debugMode').checked = settings.debugMode;
+            document.getElementById('serverHost').value = settings.serverHost;
+            
+            if (document.getElementById('autoStart')) {
+                document.getElementById('autoStart').checked = settings.autoStart;
+            }
+            if (document.getElementById('debugMode')) {
+                document.getElementById('debugMode').checked = settings.debugMode;
+            }
         } catch (error) {
             console.error('Error loading settings:', error);
         }
     }
     
     bindEvents() {
-        // Settings form submission
-        document.getElementById('settingsForm').addEventListener('submit', (e) => {
-            e.preventDefault();
+        // Save settings button
+        document.getElementById('saveSettings').addEventListener('click', () => {
             this.saveSettings();
         });
         
@@ -45,25 +45,21 @@ class PopupController {
             this.testConnection();
         });
         
-        // Advanced settings toggle
-        document.getElementById('advancedToggle').addEventListener('click', (e) => {
-            e.preventDefault();
-            const advanced = document.getElementById('advancedSettings');
-            advanced.classList.toggle('show');
-            e.target.textContent = advanced.classList.contains('show') 
-                ? 'Hide Advanced Settings' 
-                : 'Advanced Settings';
+        // Auto-test connection when serverHost changes
+        document.getElementById('serverHost').addEventListener('blur', () => {
+            const host = document.getElementById('serverHost').value.trim();
+            if (host) {
+                setTimeout(() => this.testConnection(), 300);
+            }
         });
     }
     
     async saveSettings() {
         const settings = {
             username: document.getElementById('username').value.trim(),
-            host: document.getElementById('host').value.trim(),
-            sampleRate: document.getElementById('sampleRate').value,
-            alphaWarp: document.getElementById('alphaWarp').value,
-            autoStart: document.getElementById('autoStart').checked,
-            debugMode: document.getElementById('debugMode').checked
+            serverHost: document.getElementById('serverHost').value.trim(),
+            autoStart: document.getElementById('autoStart') ? document.getElementById('autoStart').checked : true,
+            debugMode: document.getElementById('debugMode') ? document.getElementById('debugMode').checked : false
         };
         
         // Validate settings
@@ -72,7 +68,7 @@ class PopupController {
             return;
         }
         
-        if (!settings.host) {
+        if (!settings.serverHost) {
             this.showStatus('error', 'Please enter a server host');
             return;
         }
@@ -84,13 +80,21 @@ class PopupController {
             // Send to content script
             const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
             if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
-                chrome.tabs.sendMessage(tab.id, {
-                    action: 'updateSettings',
-                    settings: settings
-                });
+                try {
+                    await chrome.tabs.sendMessage(tab.id, {
+                        type: 'UPDATE_SETTINGS',
+                        settings: settings
+                    });
+                } catch (error) {
+                    console.log('Content script not ready yet, settings saved to storage');
+                }
             }
             
             this.showStatus('success', '✅ Settings saved successfully');
+            
+            // Test connection after saving
+            setTimeout(() => this.testConnection(), 500);
+            
         } catch (error) {
             console.error('Error saving settings:', error);
             this.showStatus('error', 'Failed to save settings');
@@ -98,8 +102,8 @@ class PopupController {
     }
     
     async testConnection() {
-        const host = document.getElementById('host').value.trim();
-        if (!host) {
+        const serverHost = document.getElementById('serverHost').value.trim();
+        if (!serverHost) {
             this.showStatus('error', 'Please enter a server host first');
             return;
         }
@@ -107,7 +111,7 @@ class PopupController {
         this.showStatus('testing', '🔄 Testing connection...');
         
         try {
-            const response = await fetch(`${host}/health`, {
+            const response = await fetch(`${serverHost}/health`, {
                 method: 'GET',
                 mode: 'cors',
                 cache: 'no-cache'
@@ -116,85 +120,168 @@ class PopupController {
             if (response.ok) {
                 const data = await response.json();
                 this.showStatus('success', `✅ Connected! Active sessions: ${data.active_sessions}`);
+                
+                // Show server configuration if available
+                if (data.config) {
+                    this.displayServerConfig(data.config);
+                }
+                
+                // Update connection status
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').style.color = '#4CAF50';
+                
             } else {
                 this.showStatus('error', `❌ Server error: ${response.status}`);
+                this.hideServerConfig();
             }
         } catch (error) {
             console.error('Connection test failed:', error);
             this.showStatus('error', '❌ Connection failed. Check host and server status.');
+            this.hideServerConfig();
+        }
+    }
+    
+    displayServerConfig(config) {
+        const section = document.getElementById('serverConfigSection');
+        if (section) {
+            section.style.display = 'block';
+            
+            const setBinValue = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = value || '-';
+            };
+            
+            setBinValue('configAngularBins', config.ANGULAR_BINS);
+            setBinValue('configRadialBins', config.RADIAL_BINS);
+            setBinValue('configSampleRate', config.SAMPLE_RATE_HZ ? `${config.SAMPLE_RATE_HZ} Hz` : '-');
+            setBinValue('configAlphaWarp', config.ALPHA_WARP);
+        }
+    }
+    
+    hideServerConfig() {
+        const section = document.getElementById('serverConfigSection');
+        if (section) {
+            section.style.display = 'none';
+        }
+        
+        // Update connection status
+        const statusEl = document.getElementById('connectionStatus');
+        if (statusEl) {
+            statusEl.textContent = 'Disconnected';
+            statusEl.style.color = '#f44336';
         }
     }
     
     showStatus(type, message) {
-        const statusEl = document.getElementById('status');
-        statusEl.className = `status ${type}`;
+        // Try to find a status element, create one if it doesn't exist
+        let statusEl = document.getElementById('status');
+        if (!statusEl) {
+            // Create a temporary status display
+            statusEl = document.createElement('div');
+            statusEl.id = 'status';
+            statusEl.style.cssText = `
+                margin: 10px 0;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                text-align: center;
+            `;
+            
+            // Insert after the actions div
+            const actionsDiv = document.querySelector('.actions');
+            if (actionsDiv && actionsDiv.parentNode) {
+                actionsDiv.parentNode.insertBefore(statusEl, actionsDiv.nextSibling);
+            }
+        }
+        
+        // Set styles based on type
+        switch (type) {
+            case 'success':
+                statusEl.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+                statusEl.style.color = '#4CAF50';
+                statusEl.style.border = '1px solid #4CAF50';
+                break;
+            case 'error':
+                statusEl.style.backgroundColor = 'rgba(244, 67, 54, 0.2)';
+                statusEl.style.color = '#f44336';
+                statusEl.style.border = '1px solid #f44336';
+                break;
+            case 'testing':
+                statusEl.style.backgroundColor = 'rgba(255, 193, 7, 0.2)';
+                statusEl.style.color = '#FFC107';
+                statusEl.style.border = '1px solid #FFC107';
+                break;
+            default:
+                statusEl.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                statusEl.style.color = 'white';
+                statusEl.style.border = '1px solid rgba(255, 255, 255, 0.3)';
+        }
+        
         statusEl.textContent = message;
         
-        // Reset after 3 seconds for non-persistent messages
-        if (type !== 'connected' && type !== 'collecting') {
+        // Clear status after 5 seconds for non-error messages
+        if (type !== 'error') {
             setTimeout(() => {
-                this.updateConnectionStatus();
-            }, 3000);
+                if (statusEl && statusEl.parentNode) {
+                    statusEl.style.opacity = '0';
+                    setTimeout(() => {
+                        if (statusEl && statusEl.parentNode) {
+                            statusEl.parentNode.removeChild(statusEl);
+                        }
+                    }, 300);
+                }
+            }, 5000);
         }
     }
     
-    async updateConnectionStatus() {
+    async updateStatus() {
         try {
-            // Get status from background script or content script
             const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-            if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
-                chrome.tabs.sendMessage(tab.id, {action: 'getStatus'}, (response) => {
-                    if (chrome.runtime.lastError) {
-                        this.showStatus('disconnected', '🔴 Extension not active');
-                        return;
-                    }
-                    
-                    if (response) {
-                        if (response.collecting) {
-                            this.showStatus('collecting', '🟢 Collecting data...');
-                            this.updateStats(response.stats);
-                        } else if (response.connected) {
-                            this.showStatus('connected', '🟡 Connected, waiting for game');
-                        } else {
-                            this.showStatus('disconnected', '🔴 Disconnected');
-                        }
-                    }
-                });
-            } else {
-                this.showStatus('disconnected', '🔴 Go to slither.io to start');
+            if (!tab || (!tab.url.includes('slither.io') && !tab.url.includes('slither.com'))) {
+                document.getElementById('gameStatus').textContent = 'Not on Slither.io';
+                document.getElementById('collectionStatus').textContent = 'N/A';
+                return;
+            }
+            
+            // Try to get status from content script
+            try {
+                const response = await chrome.tabs.sendMessage(tab.id, {type: 'GET_STATUS'});
+                if (response) {
+                    document.getElementById('gameStatus').textContent = 
+                        response.gameState?.isActive ? 'Active' : 'Inactive';
+                    document.getElementById('collectionStatus').textContent = 
+                        response.isCollecting ? 'Collecting' : 'Stopped';
+                }
+            } catch (error) {
+                // Content script might not be loaded yet
+                document.getElementById('gameStatus').textContent = 'Loading...';
+                document.getElementById('collectionStatus').textContent = 'Loading...';
             }
         } catch (error) {
             console.error('Error updating status:', error);
-            this.showStatus('disconnected', '🔴 Disconnected');
         }
-    }
-    
-    updateStats(stats) {
-        if (!stats) return;
-        
-        const statsPanel = document.getElementById('statsPanel');
-        statsPanel.style.display = 'block';
-        
-        document.getElementById('sessionId').textContent = 
-            stats.sessionId ? stats.sessionId.substring(0, 8) + '...' : '-';
-        document.getElementById('frameCount').textContent = stats.frameCount || '0';
-        document.getElementById('validRate').textContent = 
-            stats.validRate ? stats.validRate + '%' : '0%';
-        document.getElementById('errorCount').textContent = stats.errors || '0';
     }
     
     startStatusUpdates() {
         // Update status immediately
-        this.updateConnectionStatus();
+        this.updateStatus();
         
-        // Update every 2 seconds
+        // Update status every 2 seconds
         setInterval(() => {
-            this.updateConnectionStatus();
+            this.updateStatus();
         }, 2000);
+        
+        // Auto-test connection on load
+        setTimeout(() => {
+            const host = document.getElementById('serverHost').value.trim();
+            if (host) {
+                this.testConnection();
+            }
+        }, 1000);
     }
 }
 
-// Initialize popup when DOM is loaded
+// Initialize popup when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     new PopupController();
 });

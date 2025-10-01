@@ -14,5 +14,8 @@
   },
   "devDependencies": {
     "jsonschema": "^1.4.1"
+  },
+  "dependencies": {
+    "sharp": "^0.34.4"
   }
 }

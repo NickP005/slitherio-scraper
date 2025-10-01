@@ -3,6 +3,7 @@
 class SlitherDataCollector {
     constructor() {
         this.settings = null;
+        this.serverConfig = null;
         this.isCollecting = false;
         this.gameState = {
             gameRadius: null,
@@ -11,13 +12,6 @@ class SlitherDataCollector {
             frameCount: 0,
             validFrames: 0,
             errors: 0
-        };
-        this.samplingState = {
-            lastSampleTime: 0,
-            previousPosition: null,
-            emaChannels: null,
-            isBoosting: false,
-            mousePos: { x: 0, y: 0 }
         };
         
         this.init();
@@ -48,26 +42,61 @@ class SlitherDataCollector {
         try {
             this.settings = await chrome.storage.sync.get({
                 username: 'anonymous',
-                host: 'http://127.0.0.1:5055',
-                sampleRate: '10',
-                alphaWarp: '6.0',
+                serverHost: 'http://127.0.0.1:5055',
                 autoStart: true,
                 debugMode: false
             });
             
+            // Try to fetch server configuration
+            await this.fetchServerConfig();
+            
             console.log('[Slither Data Collector] Settings loaded:', this.settings);
         } catch (error) {
-            console.error('[Slither Data Collector] Error loading settings:', error);
+            console.error('[Slither Data Collector] Failed to load settings:', error);
             // Use defaults
             this.settings = {
                 username: 'anonymous',
-                host: 'http://127.0.0.1:5055',
-                sampleRate: '10',
-                alphaWarp: '6.0',
+                serverHost: 'http://127.0.0.1:5055',
                 autoStart: true,
                 debugMode: false
             };
         }
+    }
+    
+    async fetchServerConfig() {
+        try {
+            const configUrl = `${this.settings.serverHost}/config`;
+            const response = await fetch(configUrl);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            if (data.status === 'ok' && data.config) {
+                this.serverConfig = data.config;
+                console.log('[Slither Data Collector] Server config loaded:', this.serverConfig);
+                return true;
+            }
+        } catch (error) {
+            console.warn('[Slither Data Collector] Failed to fetch server config:', error.message);
+            // Set default config
+            this.serverConfig = {
+                ANGULAR_BINS: 64,
+                RADIAL_BINS: 24,
+                ALPHA_WARP: 6.0,
+                R_MIN: 60,
+                R_MAX: 3200,
+                SAMPLE_RATE_HZ: 10,
+                EMA_ALPHA: 0.05,
+                FOOD_NORM_FACTOR: 10.0,
+                SNAKE_NORM_FACTOR: 5.0,
+                HEAD_WEIGHT: 3.0,
+                DEBUG_LOG: true,
+                STATS_INTERVAL: 100
+            };
+        }
+        return false;
     }
     
     injectCollectionScript() {
@@ -75,63 +104,28 @@ class SlitherDataCollector {
         const script = document.createElement('script');
         script.src = chrome.runtime.getURL('content/injected-script.js');
         script.onload = () => {
-            // Send configuration to injected script
+            // Send configuration to injected script (merge server config with settings)
+            const config = {
+                ...this.serverConfig,
+                USERNAME: this.settings.username,
+                BACKEND_URL: `${this.settings.serverHost}/ingest`,
+                CONFIG_URL: `${this.settings.serverHost}/config`,
+                DEBUG_LOG: this.settings.debugMode,
+                CHANNELS: 4
+            };
+            
             window.postMessage({
                 type: 'SLITHER_CONFIG',
-                config: {
-                    ANGULAR_BINS: 64,
-                    RADIAL_BINS: 24,
-                    ALPHA_WARP: parseFloat(this.settings.alphaWarp),
-                    R_MIN: 60,
-                    R_MAX: 3200,
-                    SAMPLE_RATE_HZ: parseInt(this.settings.sampleRate),
-                    EMA_BETA: 0.99,
-                    SATURATION_FACTOR: 3.0,
-                    CHANNELS: 4,
-                    USERNAME: this.settings.username,
-                    BACKEND_URL: `${this.settings.host}/ingest`,
-                    DEBUG_LOG: this.settings.debugMode
-                }
+                config: config
             }, '*');
+            
+            console.log('[Slither Data Collector] Configuration sent to injected script:', config);
         };
+        
         (document.head || document.documentElement).appendChild(script);
     }
     
     setupMessageListeners() {
-        // Listen for messages from popup
-        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-            switch (request.action) {
-                case 'updateSettings':
-                    this.updateSettings(request.settings);
-                    sendResponse({success: true});
-                    break;
-                    
-                case 'getStatus':
-                    sendResponse({
-                        collecting: this.isCollecting,
-                        connected: true,
-                        stats: {
-                            sessionId: this.gameState.sessionId,
-                            frameCount: this.gameState.frameCount,
-                            validRate: this.gameState.frameCount > 0 ? 
-                                Math.round((this.gameState.validFrames / this.gameState.frameCount) * 100) : 0,
-                            errors: this.gameState.errors
-                        }
-                    });
-                    break;
-                    
-                case 'startCollection':
-                    this.startCollection();
-                    sendResponse({success: true});
-                    break;
-                    
-                case 'stopCollection':
-                    this.stopCollection();
-                    sendResponse({success: true});
-                    break;
-            }
-        });
-        
         // Listen for messages from injected script
         window.addEventListener('message', (event) => {
             if (event.source !== window) return;
@@ -140,60 +134,102 @@ class SlitherDataCollector {
                 case 'SLITHER_GAME_STATE':
                     this.updateGameState(event.data.gameState);
                     break;
-                    
+                case 'SLITHER_COLLECTION_STATUS':
+                    this.updateCollectionStatus(event.data.status);
+                    break;
                 case 'SLITHER_DATA_FRAME':
                     this.handleDataFrame(event.data.frame);
                     break;
-                    
                 case 'SLITHER_ERROR':
                     this.handleError(event.data.error);
                     break;
-                    
-                case 'SLITHER_STATUS':
-                    this.updateCollectionStatus(event.data.status);
+            }
+        });
+        
+        // Listen for messages from popup
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            switch (message.type) {
+                case 'GET_STATUS':
+                    sendResponse({
+                        isCollecting: this.isCollecting,
+                        gameState: this.gameState,
+                        settings: this.settings,
+                        serverConfig: this.serverConfig
+                    });
                     break;
+                case 'START_COLLECTION':
+                    this.startCollection();
+                    sendResponse({ success: true });
+                    break;
+                case 'STOP_COLLECTION':
+                    this.stopCollection();
+                    sendResponse({ success: true });
+                    break;
+                case 'UPDATE_SETTINGS':
+                    this.updateSettings(message.settings);
+                    sendResponse({ success: true });
+                    break;
+                case 'TEST_CONNECTION':
+                    this.testConnection().then(result => {
+                        sendResponse(result);
+                    });
+                    return true; // Keep channel open for async response
             }
         });
     }
     
+    async testConnection() {
+        try {
+            const response = await fetch(`${this.settings.serverHost}/health`);
+            if (response.ok) {
+                const data = await response.json();
+                return { success: true, data: data };
+            } else {
+                return { success: false, error: `HTTP ${response.status}` };
+            }
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+    
     setupEventHandlers() {
-        // Mouse events for boost detection
-        document.addEventListener('mousedown', (event) => {
-            if (event.button === 0) {
-                this.samplingState.isBoosting = true;
-                this.notifyBoostChange(true);
-            }
+        // Mouse movement tracking
+        document.addEventListener('mousemove', (event) => {
+            this.notifyMouseMove(event.clientX, event.clientY);
         });
         
-        document.addEventListener('mouseup', (event) => {
-            if (event.button === 0) {
-                this.samplingState.isBoosting = false;
-                this.notifyBoostChange(false);
-            }
-        });
-        
-        // Keyboard events for boost
+        // Key events for boost tracking
         document.addEventListener('keydown', (event) => {
-            if (event.code === 'Space') {
-                event.preventDefault();
-                this.samplingState.isBoosting = true;
+            if (event.code === 'Space' || event.button === 0) {
                 this.notifyBoostChange(true);
             }
         });
         
         document.addEventListener('keyup', (event) => {
             if (event.code === 'Space') {
-                event.preventDefault();
-                this.samplingState.isBoosting = false;
                 this.notifyBoostChange(false);
             }
         });
         
-        // Mouse movement tracking
-        document.addEventListener('mousemove', (event) => {
-            this.samplingState.mousePos.x = event.clientX;
-            this.samplingState.mousePos.y = event.clientY;
+        document.addEventListener('mousedown', (event) => {
+            if (event.button === 0) {
+                this.notifyBoostChange(true);
+            }
         });
+        
+        document.addEventListener('mouseup', (event) => {
+            if (event.button === 0) {
+                this.notifyBoostChange(false);
+            }
+        });
+    }
+    
+    notifyMouseMove(x, y) {
+        window.postMessage({
+            type: 'SLITHER_MOUSE_MOVE',
+            x: x,
+            y: y
+        }, '*');
     }
     
     notifyBoostChange(boosting) {
@@ -203,75 +239,78 @@ class SlitherDataCollector {
         }, '*');
     }
     
-    updateSettings(newSettings) {
+    async updateSettings(newSettings) {
         this.settings = { ...this.settings, ...newSettings };
         
-        // Send updated config to injected script
-        window.postMessage({
-            type: 'SLITHER_CONFIG_UPDATE',
-            config: {
-                ALPHA_WARP: parseFloat(this.settings.alphaWarp),
-                SAMPLE_RATE_HZ: parseInt(this.settings.sampleRate),
-                USERNAME: this.settings.username,
-                BACKEND_URL: `${this.settings.host}/ingest`,
-                DEBUG_LOG: this.settings.debugMode
-            }
-        }, '*');
+        // Save to storage
+        await chrome.storage.sync.set(this.settings);
         
-        console.log('[Slither Data Collector] Settings updated:', this.settings);
+        // Refetch server config if host changed
+        if (newSettings.serverHost) {
+            await this.fetchServerConfig();
+        }
+        
+        // Update injected script configuration
+        const config = {
+            ...this.serverConfig,
+            USERNAME: this.settings.username,
+            BACKEND_URL: `${this.settings.serverHost}/ingest`,
+            CONFIG_URL: `${this.settings.serverHost}/config`,
+            DEBUG_LOG: this.settings.debugMode,
+            CHANNELS: 4
+        };
+        
+        window.postMessage({
+            type: 'SLITHER_UPDATE_CONFIG',
+            config: config
+        }, '*');
     }
     
     updateGameState(gameState) {
         this.gameState = { ...this.gameState, ...gameState };
         
-        // Auto-start collection if enabled and game is active
+        // Auto-start collection if enabled
         if (this.settings.autoStart && gameState.isActive && !this.isCollecting) {
             this.startCollection();
         }
     }
     
     updateCollectionStatus(status) {
-        this.isCollecting = status.collecting;
-        
-        if (this.settings.debugMode) {
-            console.log('[Slither Data Collector] Status update:', status);
+        this.isCollecting = status.isCollecting;
+        if (status.frameCount !== undefined) {
+            this.gameState.frameCount = status.frameCount;
+        }
+        if (status.errors !== undefined) {
+            this.gameState.errors = status.errors;
         }
     }
     
     handleDataFrame(frame) {
-        this.gameState.frameCount++;
-        if (frame.validation && frame.validation.hasSnake) {
-            this.gameState.validFrames++;
-        }
-        
-        // Send to backend via injected script (which handles CORS)
-        window.postMessage({
-            type: 'SLITHER_SEND_DATA',
-            frame: frame
-        }, '*');
+        // Data frame received - could forward to popup for display
+        this.gameState.validFrames++;
     }
     
     handleError(error) {
+        console.error('[Slither Data Collector] Error from injected script:', error);
         this.gameState.errors++;
-        console.error('[Slither Data Collector] Error:', error);
     }
     
     startCollection() {
         window.postMessage({
             type: 'SLITHER_START_COLLECTION'
         }, '*');
-        console.log('[Slither Data Collector] Collection started');
+        this.isCollecting = true;
     }
     
     stopCollection() {
         window.postMessage({
             type: 'SLITHER_STOP_COLLECTION'
         }, '*');
-        console.log('[Slither Data Collector] Collection stopped');
+        this.isCollecting = false;
     }
     
     startGamePolling() {
-        // Poll for game state every second
+        // Poll for game state changes
         setInterval(() => {
             window.postMessage({
                 type: 'SLITHER_REQUEST_STATUS'
@@ -280,7 +319,7 @@ class SlitherDataCollector {
     }
 }
 
-// Initialize when content script loads
+// Initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         new SlitherDataCollector();

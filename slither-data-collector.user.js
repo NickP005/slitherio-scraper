@@ -1,9 +1,12 @@
 // ==UserScript==
 // @name         Slither.io ESN Data Collector
-// @namespace    http://tampermonkey.net/
-// @version      1.0.0
-// @description  Collects game state data for ESN training with polar multi-resolution grid
-// @author       ESN Trainer
+// @namespace    https://github.com/NickP005/slitherio-scraper
+// @version      2.0.0
+// @description  Collects Slither.io game state data for Echo State Network training using polar multi-resolution grids
+// @author       NickP005 (https://github.com/NickP005)
+// @homepage     https://github.com/NickP005/slitherio-scraper
+// @supportURL   https://github.com/NickP005/slitherio-scraper/issues
+// @license      GPL-3.0
 // @match        *://slither.io/*
 // @match        *://slither.com/*
 // @grant        GM_xmlhttpRequest
@@ -11,43 +14,81 @@
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
+// @updateURL    https://github.com/NickP005/slitherio-scraper/raw/main/slither-data-collector.user.js
+// @downloadURL  https://github.com/NickP005/slitherio-scraper/raw/main/slither-data-collector.user.js
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     // ===========================================
-    // CONFIGURATION - Modify these as needed
+    // CONFIGURATION - Fetched from server
     // ===========================================
-    const CONFIG = {
-        // Grid configuration
-        ANGULAR_BINS: 64,           // Number of angular bins
-        RADIAL_BINS: 24,           // Number of radial bins
-        ALPHA_WARP: 6.0,           // Angular warping factor for front density
-        R_MIN: 60,                 // Minimum radius in game units
-        R_MAX: 3200,               // Maximum radius in game units
+    let CONFIG = {
+        // Default fallback values (will be replaced by server config)
+        ANGULAR_BINS: 64,
+        RADIAL_BINS: 24,
+        ALPHA_WARP: 6.0,
+        R_MIN: 60,
+        R_MAX: 3200,
+        SAMPLE_RATE_HZ: 10,
+        EMA_ALPHA: 0.05,
+        FOOD_NORM_FACTOR: 10.0,
+        SNAKE_NORM_FACTOR: 5.0,
+        HEAD_WEIGHT: 3.0,
+        DEBUG_LOG: true,
+        STATS_INTERVAL: 100,
 
-        // Sampling
-        SAMPLE_RATE_HZ: 10,        // Sampling frequency
-
-        // Normalization
-        EMA_BETA: 0.99,            // EMA smoothing factor
-        SATURATION_FACTOR: 3.0,    // Saturation clipping factor
-
-        // Channels (4 channels: food, enemy_body, my_body, enemy_heads)
+        // Client-specific settings
         CHANNELS: 4,
         CH_FOOD: 0,
         CH_ENEMY_BODY: 1,
         CH_MY_BODY: 2,
         CH_ENEMY_HEADS: 3,
-
+        
         // Backend
         BACKEND_URL: 'http://127.0.0.1:5055/ingest',
-
-        // Debug
-        DEBUG_LOG: true,
-        LOG_INTERVAL_MS: 5000      // Log stats every 5 seconds
+        CONFIG_URL: 'http://127.0.0.1:5055/config',
+        
+        // Username (modify this!)
+        USERNAME: 'YourUsername'
     };
+
+    // ===========================================
+    // CONFIGURATION FETCHING
+    // ===========================================
+    async function fetchServerConfig() {
+        try {
+            const response = await fetch(CONFIG.CONFIG_URL);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            if (data.status === 'ok' && data.config) {
+                // Merge server config with client config
+                const serverConfig = data.config;
+                Object.assign(CONFIG, serverConfig);
+                
+                // Reinitialize EMA array with new dimensions
+                samplingState.emaChannels = new Float32Array(
+                    CONFIG.ANGULAR_BINS * CONFIG.RADIAL_BINS * CONFIG.CHANNELS
+                );
+                
+                log('INFO', 'Configuration loaded from server', {
+                    angularBins: CONFIG.ANGULAR_BINS,
+                    radialBins: CONFIG.RADIAL_BINS,
+                    alphaWarp: CONFIG.ALPHA_WARP,
+                    sampleRate: CONFIG.SAMPLE_RATE_HZ
+                });
+                
+                return true;
+            }
+        } catch (error) {
+            log('WARN', 'Failed to fetch server config, using defaults', error.message);
+        }
+        return false;
+    }
 
     // ===========================================
     // STATE VARIABLES
@@ -58,7 +99,8 @@
         sessionId: null,
         frameCount: 0,
         validFrames: 0,
-        errors: 0
+        errors: 0,
+        configLoaded: false
     };
 
     let samplingState = {
@@ -571,6 +613,9 @@
     // BACKEND COMMUNICATION
     // ===========================================
     function sendDataToBackend(data) {
+        // Add username to the data package
+        data.username = CONFIG.USERNAME;
+        
         if (gameState.frameCount <= 5) {
             console.log('[SLITHER-ESN] Attempting to send data to backend...', CONFIG.BACKEND_URL);
         }
@@ -734,13 +779,23 @@
     // ===========================================
     // INITIALIZATION
     // ===========================================
-    function initialize() {
+    async function initialize() {
         console.log('[SLITHER-ESN] INITIALIZE function called');
 
         try {
+            // First, try to fetch server configuration
+            log('INFO', 'Fetching server configuration...');
+            gameState.configLoaded = await fetchServerConfig();
+            
             log('INFO', 'Slither.io ESN Data Collector starting', {
-                version: '1.0.0',
-                config: CONFIG
+                version: '2.0.0',
+                configLoaded: gameState.configLoaded,
+                username: CONFIG.USERNAME,
+                config: {
+                    angularBins: CONFIG.ANGULAR_BINS,
+                    radialBins: CONFIG.RADIAL_BINS,
+                    sampleRate: CONFIG.SAMPLE_RATE_HZ
+                }
             });
 
             // Test basic functionality first
