@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 jobs:
   build-extension:
     runs-on: ubuntu-latest
@@ -60,13 +63,10 @@ jobs:
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.get_version.outputs.VERSION }}
-        release_name: Slither.io ESN Data Collector ${{ steps.get_version.outputs.VERSION }}
+        name: Slither.io ESN Data Collector ${{ steps.get_version.outputs.VERSION }}
         body: |
           ## Slither.io ESN Data Collector Extension
           
@@ -89,18 +89,23 @@ jobs:
           3. Data collection will begin automatically
           
           For detailed setup instructions, see the [README](https://github.com/NickP005/slitherio-scraper/blob/main/README.md).
+        files: |
+          slither-esn-extension-*.zip
         draft: false
         prerelease: false
-        
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./slither-esn-extension-${{ github.sha }}.zip
-        asset_name: slither-esn-extension.zip
-        asset_content_type: application/zip
+          - 🎯 Real-time data collection from Slither.io
+          - ⚙️ Easy configuration via extension popup
+          - 📊 Live statistics and connection status
+          - 🔄 Automatic data transmission to your backend server
+          
+          ### Usage:
+          1. Configure your username and server host in the extension popup
+          2. Go to slither.io and start playing
+          3. Data collection will begin automatically
+          
+          For detailed setup instructions, see the [README](https://github.com/NickP005/slitherio-scraper/blob/main/README.md).
+        draft: false
+        prerelease: false
         
     - name: Update Chrome Web Store (Optional)
       if: false  # Set to true when you have Chrome Web Store credentials
