@@ -1,0 +1,18 @@
+{
+  "name": "slither-esn-data-collector",
+  "version": "1.0.0",
+  "description": "Browser extension for collecting ESN training data from Slither.io",
+  "author": "Niccolò Pagano",
+  "license": "GPL-3.0",
+  "scripts": {
+    "build": "npm run clean && npm run copy-files && npm run validate",
+    "clean": "rm -rf dist && mkdir -p dist",
+    "copy-files": "cp -r manifest.json popup/ content/ background/ icons/ dist/",
+    "validate": "node scripts/validate-manifest.js",
+    "pack": "cd dist && zip -r ../extension.zip .",
+    "dev": "npm run build && npm run pack"
+  },
+  "devDependencies": {
+    "jsonschema": "^1.4.1"
+  }
+}
