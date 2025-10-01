@@ -31,24 +31,34 @@ class BackgroundService {
         console.log('[Background] Slither.io Data Collector service worker initialized');
     }
     
-    onInstall() {
-        // Set default settings
-        chrome.storage.sync.set({
+    async onInstall() {
+        // Set default settings only if they don't exist
+        const existing = await chrome.storage.sync.get({
             username: '',
-            host: 'http://127.0.0.1:5055',
-            sampleRate: '10',
-            alphaWarp: '6.0',
+            serverHost: 'http://127.0.0.1:5055',
             autoStart: true,
             debugMode: false
         });
         
-        // Show welcome notification
-        chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icons/icon48.png',
-            title: 'Slither.io Data Collector Installed',
-            message: 'Click the extension icon to configure settings and start collecting data!'
-        });
+        // Only set defaults for missing values
+        const defaults = {
+            username: existing.username || '',
+            serverHost: existing.serverHost || 'http://127.0.0.1:5055',
+            autoStart: existing.autoStart !== undefined ? existing.autoStart : true,
+            debugMode: existing.debugMode !== undefined ? existing.debugMode : false
+        };
+        
+        await chrome.storage.sync.set(defaults);
+        
+        // Show welcome notification (only on fresh install)
+        if (!existing.username && !existing.serverHost) {
+            chrome.notifications.create({
+                type: 'basic',
+                iconUrl: 'icons/icon48.png',
+                title: 'Slither.io Data Collector Installed',
+                message: 'Click the extension icon to configure settings and start collecting data!'
+            });
+        }
         
         console.log('[Background] Extension installed, default settings applied');
     }

@@ -210,15 +210,34 @@
     }
     
     function sampleGameState() {
-        if (!samplingState.isCollecting) return;
+        if (!samplingState.isCollecting) {
+            if (CONFIG.DEBUG_LOG) console.log('[Slither Injected] Not collecting, skipping sample');
+            return;
+        }
         
         const now = performance.now();
         const deltaTime = (now - samplingState.lastSampleTime) / 1000.0;
         gameState.frameCount++;
         
+        if (CONFIG.DEBUG_LOG && gameState.frameCount % 50 === 1) {
+            console.log('[Slither Injected] Sample attempt', gameState.frameCount);
+        }
+        
         try {
             const mySnake = getMySnake();
-            if (!mySnake || !mySnake.xx || !mySnake.yy) return;
+            if (!mySnake) {
+                if (CONFIG.DEBUG_LOG) console.log('[Slither Injected] No snake found');
+                return;
+            }
+            
+            if (!mySnake.xx || !mySnake.yy) {
+                if (CONFIG.DEBUG_LOG) console.log('[Slither Injected] Snake has no position');
+                return;
+            }
+            
+            if (CONFIG.DEBUG_LOG && gameState.frameCount % 50 === 1) {
+                console.log('[Slither Injected] Snake found at', mySnake.xx, mySnake.yy);
+            }
             
             const currentPos = { x: mySnake.xx, y: mySnake.yy };
             const velocity = samplingState.previousPosition && deltaTime > 0 ? 
@@ -238,12 +257,17 @@
                 foodCount = populateGridWithFood(grid, mySnake);
                 snakeData = populateGridWithSnakes(grid, mySnake);
             } catch (error) {
+                if (CONFIG.DEBUG_LOG) console.log('[Slither Injected] Grid population error:', error);
                 gameState.errors++;
                 return;
             }
             
             normalizeGrid(grid, samplingState.emaChannels);
             const playerInput = capturePlayerInput(mySnake);
+            
+            if (CONFIG.DEBUG_LOG && gameState.frameCount % 50 === 1) {
+                console.log('[Slither Injected] Sending data package, foods:', foodCount, 'snakes:', snakeData);
+            }
             
             const dataPackage = {
                 timestamp: now,
@@ -381,6 +405,7 @@
                 CONFIG = { ...CONFIG, ...event.data.config };
                 if (CONFIG.DEBUG_LOG) {
                     console.log('[Slither Injected] Config updated:', CONFIG);
+                    console.log('[Slither Injected] USERNAME in config:', CONFIG.USERNAME);
                 }
                 break;
                 

@@ -17,7 +17,7 @@ class PopupController {
                 username: '',
                 serverHost: 'http://127.0.0.1:5055',
                 autoStart: true,
-                debugMode: false
+                debugMode: true  // Enable debug by default for testing
             });
             
             document.getElementById('username').value = settings.username;
@@ -103,8 +103,15 @@ class PopupController {
     
     async testConnection() {
         const serverHost = document.getElementById('serverHost').value.trim();
+        const username = document.getElementById('username').value.trim();
+        
         if (!serverHost) {
             this.showStatus('error', 'Please enter a server host first');
+            return;
+        }
+        
+        if (!username) {
+            this.showStatus('error', 'Please enter a username first');
             return;
         }
         

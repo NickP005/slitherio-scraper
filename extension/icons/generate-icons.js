@@ -16,11 +16,11 @@ async function generateIcons() {
             await sharp(svgPath)
                 .resize(size, size)
                 .png()
-                .toFile(`icon-${size}.png`);
+                .toFile(`icon${size}.png`);
             
-            console.log(`✓ Generated icon-${size}.png`);
+            console.log(`✓ Generated icon${size}.png`);
         } catch (error) {
-            console.error(`✗ Failed to generate icon-${size}.png:`, error);
+            console.error(`✗ Failed to generate icon${size}.png:`, error);
         }
     }
 }

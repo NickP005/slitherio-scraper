@@ -286,8 +286,39 @@ class SlitherDataCollector {
     }
     
     handleDataFrame(frame) {
-        // Data frame received - could forward to popup for display
+        // Data frame received - send to backend
         this.gameState.validFrames++;
+        this.sendDataToBackend(frame);
+    }
+    
+    async sendDataToBackend(frame) {
+        if (!this.settings || !this.settings.serverHost) {
+            console.error('[Slither Data Collector] No server host configured');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${this.settings.serverHost}/ingest`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'SlitherDataCollector/1.0'
+                },
+                body: JSON.stringify(frame)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            if (this.settings.debugMode) {
+                console.log('[Slither Data Collector] Data sent to backend successfully');
+            }
+            
+        } catch (error) {
+            console.error('[Slither Data Collector] Backend error:', error);
+            this.gameState.errors++;
+        }
     }
     
     handleError(error) {
