@@ -62,8 +62,16 @@ def check_dependencies():
             import zarr
             import numcodecs
             # Try to actually use zarr to catch runtime issues
-            test_store = zarr.MemoryStore()
-            _ = zarr.group(store=test_store)
+            # Compatible with both zarr 2.x and 3.x
+            try:
+                # zarr 2.x API
+                test_store = zarr.MemoryStore()
+                _ = zarr.group(store=test_store)
+            except AttributeError:
+                # zarr 3.x API
+                import zarr.storage
+                test_store = zarr.storage.MemoryStore()
+                _ = zarr.group(store=test_store)
         except Exception as e:
             error_msg = str(e)
             if "cbuffer_sizes" in error_msg or "blosc" in error_msg.lower():
@@ -126,10 +134,10 @@ def fix_zarr_windows():
             pass  # May not exist, that's fine
         
         # Install specific compatible versions
-        print("  Installing compatible versions (numcodecs 0.12.1, zarr 2.18.0)...")
+        print("  Installing compatible versions (numcodecs 0.12.1, zarr 2.18.3)...")
         install_cmd = [
             sys.executable, "-m", "pip", "install", "--no-cache-dir"
-        ] + user_flag + ["numcodecs==0.12.1", "zarr==2.18.0"]
+        ] + user_flag + ["numcodecs==0.12.1", "zarr==2.18.3"]
         
         subprocess.check_call(install_cmd)
         print("✓ Zarr/numcodecs fixed successfully")
