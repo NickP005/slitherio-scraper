@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick launcher script for the Slither.io data collector server
+Quick launcher for the Slither.io visualizer
 Automatically creates and manages a virtual environment if needed.
 """
 
@@ -9,7 +9,8 @@ import subprocess
 import os
 from pathlib import Path
 
-VENV_DIR = Path(__file__).parent / "venv"
+VENV_DIR = Path(__file__).parent / "visualizer_venv"
+REQUIREMENTS_FILE = Path(__file__).parent / "visualizer_requirements.txt"
 
 def is_in_venv():
     """Check if we're running inside a virtual environment"""
@@ -19,7 +20,7 @@ def is_in_venv():
 
 def create_venv():
     """Create a virtual environment"""
-    print("Creating virtual environment...")
+    print("Creating virtual environment for visualizer...")
     try:
         subprocess.check_call([sys.executable, "-m", "venv", str(VENV_DIR)])
         print("✓ Virtual environment created")
@@ -53,10 +54,9 @@ def setup_venv():
 def check_dependencies():
     """Check if required packages are installed"""
     try:
-        import fastapi
-        import uvicorn
+        import pygame
         import numpy
-        import zarr
+        import requests
         print("✓ All dependencies are installed")
         return True
     except ImportError as e:
@@ -71,9 +71,15 @@ def install_dependencies():
             sys.executable, "-m", "pip", "install", "--upgrade", "pip"
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", "-r", "requirements.txt"
-        ])
+        if REQUIREMENTS_FILE.exists():
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS_FILE)
+            ])
+        else:
+            # Fallback: install essential packages
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "pygame", "numpy", "requests"
+            ])
         print("✓ Dependencies installed successfully")
         return True
     except subprocess.CalledProcessError:
@@ -82,12 +88,13 @@ def install_dependencies():
 
 def main():
     """Main launcher"""
-    print("Slither.io ESN Data Collector Server Launcher")
+    print("Slither.io Data Visualizer Launcher")
     print("=" * 50)
 
-    # Check if we're in the right directory
-    if not Path("requirements.txt").exists():
-        print("✗ requirements.txt not found. Make sure you're in the backend directory.")
+    # Check if visualizer.py exists
+    visualizer_path = Path(__file__).parent / "visualizer.py"
+    if not visualizer_path.exists():
+        print("✗ visualizer.py not found in the current directory.")
         return 1
 
     # Setup virtual environment (will restart script if needed)
@@ -103,20 +110,23 @@ def main():
             print("\nFailed to install dependencies. Please check the error messages above.")
             return 1
 
-    # Start the server
-    print("\nStarting data collector server...")
-    print("Server will be available at: http://127.0.0.1:5055")
-    print("Press Ctrl+C to stop the server")
+    # Start the visualizer
+    print("\nStarting visualizer...")
+    print("Make sure the backend server is running on http://127.0.0.1:5055")
+    print("Press Ctrl+C to stop")
     print("-" * 50)
 
     try:
-        from data_collector_server import main as server_main
-        server_main()
+        # Import and run visualizer
+        import runpy
+        runpy.run_path(str(visualizer_path), run_name="__main__")
     except KeyboardInterrupt:
-        print("\n\nServer stopped by user")
+        print("\n\nVisualizer stopped by user")
         return 0
     except Exception as e:
-        print(f"\n✗ Server error: {e}")
+        print(f"\n✗ Visualizer error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 if __name__ == "__main__":

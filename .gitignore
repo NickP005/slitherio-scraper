@@ -1,2 +1,10 @@
 extension/extension.zip
 extension/dist/
+extension/node_modules/
+backend/data
+backend/__pycache__/
+backend/venv/
+visualizer_venv/
+*.pyc
+__pycache__/
+.DS_Store

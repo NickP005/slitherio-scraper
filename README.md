@@ -90,28 +90,33 @@ This transformation provides:
 
 ### Prerequisites
 - Python 3.7 or higher
-- Modern web browser with Tampermonkey extension
+- Modern web browser (Chrome/Edge)
 - Internet connection for accessing Slither.io
 
 ### Quick Setup
 ```bash
 # Clone the repository
 git clone https://github.com/NickP005/slitherio-scraper.git
-cd slitherio-scraper
+cd slitherio-scraper/backend
 
-# Run automated setup
-chmod +x setup.sh
-./setup.sh
+# Simply run the server - it handles everything automatically!
+python3 run_server.py
 ```
 
-### Manual Installation
+The script will automatically:
+- Create a virtual environment if needed
+- Install all dependencies
+- Start the server on `http://127.0.0.1:5055`
 
-1. **Install Python Dependencies**:
+### Manual Installation (Optional)
+
+1. **Install Python Dependencies** (if you prefer manual control):
 ```bash
-# Create virtual environment (required on macOS/modern Linux)
 cd backend
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
 # Install backend dependencies
 pip install -r requirements.txt
@@ -136,30 +141,23 @@ python run_server.py
 
 ### Quick Start
 
-**Option A - Backend Only**:
-```bash
-./start_server.sh
-```
-
-**Option B - Backend + Real-time Visualizer**:
-```bash
-./start_with_visualizer.sh
-```
-
-### Manual Startup
-
-1. **Start the Backend Server**:
+Simply run:
 ```bash
 cd backend
-source venv/bin/activate  # Activate virtual environment
+python3 run_server.py
+```
+
+That's it! The script handles all setup automatically.
+
+### Manual Startup (Advanced)
+
+If you prefer to manually activate the virtual environment:
+```bash
+cd backend
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 python run_server.py
 ```
 Server starts on `http://127.0.0.1:5055`
-
-2. **Launch Real-time Visualizer** (optional):
-```bash
-python visualizer.py
-```
 
 3. **Begin Data Collection**:
    - Navigate to [slither.io](https://slither.io)
