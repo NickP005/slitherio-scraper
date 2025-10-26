@@ -60,13 +60,15 @@ def check_dependencies():
         # Test zarr actually works (catches blosc issues on Windows)
         try:
             import zarr
-            import zarr.storage
             import numcodecs
+            # Try to actually use zarr to catch runtime issues
+            test_store = zarr.MemoryStore()
+            _ = zarr.group(store=test_store)
         except Exception as e:
             error_msg = str(e)
-            if "cbuffer_sizes" in error_msg or "blosc" in error_msg:
+            if "cbuffer_sizes" in error_msg or "blosc" in error_msg.lower():
                 print(f"✗ Zarr/numcodecs compatibility issue (common on Windows)")
-                print(f"  Error: {error_msg}")
+                print(f"  Error: {error_msg[:100]}...")
                 print("  Fixing: Will reinstall with compatible versions...")
                 return "fix_zarr"
             else:
@@ -76,6 +78,11 @@ def check_dependencies():
         print("✓ All dependencies are installed and working")
         return True
     except ImportError as e:
+        error_msg = str(e)
+        if "cbuffer_sizes" in error_msg or "blosc" in error_msg.lower():
+            print(f"✗ Zarr/numcodecs compatibility issue (common on Windows)")
+            print(f"  Error: {error_msg[:100]}...")
+            return "fix_zarr"
         print(f"✗ Missing dependency: {e}")
         return False
         return False
@@ -101,22 +108,32 @@ def install_dependencies():
         return False
 
 def fix_zarr_windows():
-    """Fix zarr/numcodecs compatibility issues on Windows"""
+    """Fix zarr/numcodecs compatibility issues"""
     print("\nFixing zarr/numcodecs compatibility...")
     try:
+        # Check if we need --user flag (not in venv on Windows)
+        user_flag = []
+        if not is_in_venv() and sys.platform == "win32":
+            user_flag = ["--user"]
+            print("  Note: Installing with --user flag (not in virtual environment)")
+        
         # Uninstall problematic packages
         print("  Removing old versions...")
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "uninstall", "-y", "zarr", "numcodecs", "blosc2"
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        uninstall_cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "zarr", "numcodecs"]
+        try:
+            subprocess.check_call(uninstall_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass  # May not exist, that's fine
         
         # Install specific compatible versions
-        print("  Installing compatible versions...")
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", "--no-cache-dir",
-            "numcodecs==0.12.1", "zarr==2.18.0"
-        ])
+        print("  Installing compatible versions (numcodecs 0.12.1, zarr 2.18.0)...")
+        install_cmd = [
+            sys.executable, "-m", "pip", "install", "--no-cache-dir"
+        ] + user_flag + ["numcodecs==0.12.1", "zarr==2.18.0"]
+        
+        subprocess.check_call(install_cmd)
         print("✓ Zarr/numcodecs fixed successfully")
+        print("  Please restart the script for changes to take effect")
         return True
     except subprocess.CalledProcessError as e:
         print(f"✗ Failed to fix zarr: {e}")
@@ -146,6 +163,16 @@ def main():
         if not fix_zarr_windows():
             print("\nFailed to fix zarr compatibility. Please check the error messages above.")
             return 1
+        
+        # Exit and ask user to restart
+        print("\n" + "=" * 50)
+        print("✓ Fix applied! Please run the script again:")
+        if sys.platform == "win32":
+            print("  python run_server.py")
+        else:
+            print("  python3 run_server.py")
+        print("=" * 50)
+        return 0
         # Check again after fix
         deps_status = check_dependencies()
     
