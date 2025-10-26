@@ -57,7 +57,14 @@ def check_dependencies():
         import uvicorn
         import numpy
         import zarr
-        print("✓ All dependencies are installed")
+        # Test zarr actually works (catches blosc issues on Windows)
+        try:
+            import zarr.storage
+        except Exception as e:
+            print(f"✗ Zarr installation issue (common on Windows): {e}")
+            print("  This can be fixed by reinstalling dependencies.")
+            return False
+        print("✓ All dependencies are installed and working")
         return True
     except ImportError as e:
         print(f"✗ Missing dependency: {e}")
@@ -67,14 +74,32 @@ def install_dependencies():
     """Install required packages"""
     print("Installing dependencies...")
     try:
+        # Upgrade pip first
         subprocess.check_call([
             sys.executable, "-m", "pip", "install", "--upgrade", "pip"
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
+        # Install requirements
         subprocess.check_call([
             sys.executable, "-m", "pip", "install", "-r", "requirements.txt"
         ])
         print("✓ Dependencies installed successfully")
+        
+        # On Windows, sometimes zarr needs reinstalling to fix blosc issues
+        if sys.platform == "win32":
+            print("  Verifying Windows compatibility...")
+            try:
+                import zarr.storage
+            except Exception:
+                print("  Fixing Windows-specific zarr/blosc compatibility...")
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "uninstall", "-y", "zarr", "numcodecs"
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", "zarr>=2.18.0", "numcodecs>=0.12.0,<0.14.0"
+                ])
+                print("  ✓ Windows compatibility fixed")
+        
         return True
     except subprocess.CalledProcessError:
         print("✗ Failed to install dependencies")
