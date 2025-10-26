@@ -56,18 +56,28 @@ def check_dependencies():
         import fastapi
         import uvicorn
         import numpy
-        import zarr
+        
         # Test zarr actually works (catches blosc issues on Windows)
         try:
+            import zarr
             import zarr.storage
+            import numcodecs
         except Exception as e:
-            print(f"✗ Zarr installation issue (common on Windows): {e}")
-            print("  This can be fixed by reinstalling dependencies.")
-            return False
+            error_msg = str(e)
+            if "cbuffer_sizes" in error_msg or "blosc" in error_msg:
+                print(f"✗ Zarr/numcodecs compatibility issue (common on Windows)")
+                print(f"  Error: {error_msg}")
+                print("  Fixing: Will reinstall with compatible versions...")
+                return "fix_zarr"
+            else:
+                print(f"✗ Zarr installation issue: {e}")
+                return False
+        
         print("✓ All dependencies are installed and working")
         return True
     except ImportError as e:
         print(f"✗ Missing dependency: {e}")
+        return False
         return False
 
 def install_dependencies():
@@ -85,24 +95,31 @@ def install_dependencies():
         ])
         print("✓ Dependencies installed successfully")
         
-        # On Windows, sometimes zarr needs reinstalling to fix blosc issues
-        if sys.platform == "win32":
-            print("  Verifying Windows compatibility...")
-            try:
-                import zarr.storage
-            except Exception:
-                print("  Fixing Windows-specific zarr/blosc compatibility...")
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "uninstall", "-y", "zarr", "numcodecs"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", "zarr>=2.18.0", "numcodecs>=0.12.0,<0.14.0"
-                ])
-                print("  ✓ Windows compatibility fixed")
-        
         return True
     except subprocess.CalledProcessError:
         print("✗ Failed to install dependencies")
+        return False
+
+def fix_zarr_windows():
+    """Fix zarr/numcodecs compatibility issues on Windows"""
+    print("\nFixing zarr/numcodecs compatibility...")
+    try:
+        # Uninstall problematic packages
+        print("  Removing old versions...")
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "uninstall", "-y", "zarr", "numcodecs", "blosc2"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Install specific compatible versions
+        print("  Installing compatible versions...")
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "--no-cache-dir",
+            "numcodecs==0.12.1", "zarr==2.18.0"
+        ])
+        print("✓ Zarr/numcodecs fixed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"✗ Failed to fix zarr: {e}")
         return False
 
 def main():
@@ -122,10 +139,24 @@ def main():
     print(f"Running in virtual environment: {sys.prefix}")
 
     # Check dependencies
-    if not check_dependencies():
+    deps_status = check_dependencies()
+    
+    if deps_status == "fix_zarr":
+        # Need to fix zarr/numcodecs compatibility
+        if not fix_zarr_windows():
+            print("\nFailed to fix zarr compatibility. Please check the error messages above.")
+            return 1
+        # Check again after fix
+        deps_status = check_dependencies()
+    
+    if deps_status == False:
         print("\nAttempting to install dependencies...")
         if not install_dependencies():
             print("\nFailed to install dependencies. Please check the error messages above.")
+            return 1
+        # Check one more time
+        if not check_dependencies():
+            print("\nDependencies installed but still not working. Please report this issue.")
             return 1
 
     # Start the server
