@@ -35,6 +35,8 @@ def load_game_metadata(game_path):
             'max_score': attrs.get('max_score', 0),
             'avg_score': attrs.get('avg_score', 0),
             'cumulative_score': attrs.get('cumulative_score', 0),
+            'final_kill_count': attrs.get('final_kill_count', 0),
+            'max_kill_count': attrs.get('max_kill_count', 0),
             
             # Session info
             'num_frames': attrs.get('valid_frames', 0),
@@ -168,6 +170,12 @@ def print_summary(df, username):
     print(f"  Worst game: {df['final_score'].min()}")
     print(f"  Max score ever: {df['max_score'].max()}")
     
+    print(f"\n💀 Kill Statistics:")
+    print(f"  Total kills: {df['final_kill_count'].sum()}")
+    print(f"  Avg kills per game: {df['final_kill_count'].mean():.2f}")
+    print(f"  Best killing spree: {df['max_kill_count'].max()}")
+    print(f"  Games with kills: {(df['final_kill_count'] > 0).sum()}/{len(df)}")
+    
     print(f"\n⏱️  Duration Statistics:")
     print(f"  Avg game duration: {df['duration_sec'].mean():.1f}s")
     print(f"  Longest game: {df['duration_sec'].max():.1f}s")
@@ -201,6 +209,8 @@ def print_top_games(df, n=10, sort_by='composite_score'):
     for idx, (_, game) in enumerate(top.iterrows(), 1):
         cumul = game['cumulative_score']
         comp = game.get('composite_score', 0)
+        avg = game.get('avg_score', 0)
+        kills = game.get('final_kill_count', 0)
         
         # Base info
         info = f"{idx:2d}. 🐍 "
@@ -208,10 +218,12 @@ def print_top_games(df, n=10, sort_by='composite_score'):
         # Se ordinato per composite, mostra composite score prominente
         if sort_by == 'composite_score':
             info += f"Composite: {comp:.4f} | "
-            info += f"Final: {game['final_score']:3d}, Max: {game['max_score']:3d}, Cumul: {cumul:,.0f}"
+            info += f"Final: {game['final_score']:3d}, Max: {game['max_score']:3d}, Avg: {avg:5.1f}, Cumul: {cumul:,.0f}"
+            info += f" | 💀 {kills} kills"
         else:
             info += f"Final: {game['final_score']:3d} "
-            info += f"(max: {game['max_score']:3d}, cumul: {cumul:,.0f}, comp: {comp:.4f})"
+            info += f"(max: {game['max_score']:3d}, avg: {avg:.1f}, cumul: {cumul:,.0f}, comp: {comp:.4f})"
+            info += f" | 💀 {kills} kills"
         
         info += f" | {game['num_frames']:4d} frames ({game['duration_sec']:.0f}s) | {game['start_time_str']}"
         print(info)

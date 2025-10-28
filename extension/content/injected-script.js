@@ -314,7 +314,8 @@
                     boost: samplingState.isBoosting,
                     distanceToBorder: distanceToBorder,
                     gameRadius: gameRadius,
-                    snakeLength: mySnake.pts ? mySnake.pts.length : 0
+                    snakeLength: mySnake.pts ? mySnake.pts.length : 0,
+                    killCount: mySnake.kill_count || 0
                 },
                 
                 playerInput: playerInput,

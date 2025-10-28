@@ -102,6 +102,8 @@ class SessionData:
         self.cumulative_score = 0.0  # Sum of all snake lengths across frames
         self.final_score = 0  # Snake length at death/end
         self.max_score = 0  # Peak snake length achieved
+        self.max_kill_count = 0  # Maximum kill count achieved
+        self.final_kill_count = 0  # Kill count at death/end
 
         # Statistics
         self.stats = {
@@ -199,6 +201,12 @@ class SessionData:
                 self.cumulative_score += current_score
                 self.final_score = current_score
                 self.max_score = max(self.max_score, current_score)
+
+            # Update kill tracking
+            current_kills = metadata.get('killCount', 0)
+            if current_kills > 0:
+                self.final_kill_count = current_kills
+                self.max_kill_count = max(self.max_kill_count, current_kills)
 
             # Update averages
             n = self.valid_frames
@@ -408,9 +416,12 @@ class SessionData:
             self.zarr_group.attrs['final_score'] = int(self.final_score)
             self.zarr_group.attrs['max_score'] = int(self.max_score)
             self.zarr_group.attrs['avg_score'] = float(self.cumulative_score / max(1, self.valid_frames))
+            self.zarr_group.attrs['final_kill_count'] = int(self.final_kill_count)
+            self.zarr_group.attrs['max_kill_count'] = int(self.max_kill_count)
 
         logger.info(f"Session {self.session_id} finalized: {self.valid_frames} frames, "
-                   f"final_score={self.final_score}, max_score={self.max_score}")
+                   f"final_score={self.final_score}, max_score={self.max_score}, "
+                   f"kills={self.final_kill_count}")
 
 
 # ===========================================
