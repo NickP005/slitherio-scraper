@@ -8,3 +8,4 @@ visualizer_venv/
 *.pyc
 __pycache__/
 .DS_Store
+clean_data/

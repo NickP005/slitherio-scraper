@@ -11,6 +11,7 @@ Usage:
 
 import zarr
 import json
+import numpy as np
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
@@ -43,7 +44,7 @@ def load_game_metadata(game_path):
             # Timing
             'start_time': attrs.get('start_time', 0),
             'end_time': attrs.get('end_time', 0),
-            'duration_sec': attrs.get('end_time', 0) - attrs.get('start_time', 0),
+            'duration_sec': max(0, attrs.get('end_time', 0) - attrs.get('start_time', 0)),  # Prevent negative
             
             # Stats
             'avg_velocity': attrs.get('final_stats', {}).get('avg_velocity', 0),
@@ -82,10 +83,69 @@ def analyze_user_games(username, data_dir='backend/data'):
     
     df = pd.DataFrame(games)
     
+    # Filter out games with no end_time (still active)
+    active_games = df[df['end_time'] == 0]
+    completed_games = df[df['end_time'] > 0]
+    
+    if len(active_games) > 0:
+        print(f"⚠️  Found {len(active_games)} active/incomplete games (will be excluded from analysis)")
+    
+    # Use only completed games for analysis
+    if len(completed_games) == 0:
+        print(f"⚠️  No completed games found for {username}")
+        return None
+    
+    df = completed_games
+    
     # Add derived metrics
-    df['survival_rate'] = (df['num_frames'] / df['total_frames'] * 100).round(1)
+    df['survival_rate'] = (df['num_frames'] / df['total_frames'].clip(lower=1) * 100).round(1)
     df['score_per_sec'] = (df['final_score'] / df['duration_sec'].clip(lower=1)).round(2)
     df['start_time_str'] = pd.to_datetime(df['start_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Calculate composite score based on percentiles
+    df = calculate_composite_score(df)
+    
+    return df
+
+
+def calculate_composite_score(df):
+    """
+    Calcola un composite score basato su percentili per final, cumulative, max e average score.
+    
+    Per ogni gioco calcola:
+    - percentile_final (0-1): posizione rispetto agli altri per final_score
+    - percentile_cumulative (0-1): posizione per cumulative_score
+    - percentile_max (0-1): posizione per max_score
+    - percentile_avg (0-1): posizione per avg_score (incentiva media alta)
+    - composite_score = percentile_final * percentile_cumulative * percentile_max * percentile_avg
+    
+    Il miglior gioco ha composite_score = 1 (tutti i percentili a 1)
+    Il peggior gioco ha composite_score vicino a 0
+    """
+    if len(df) == 0:
+        return df
+    
+    if len(df) == 1:
+        df['percentile_final'] = 1.0
+        df['percentile_cumulative'] = 1.0
+        df['percentile_max'] = 1.0
+        df['percentile_avg'] = 1.0
+        df['composite_score'] = 1.0
+        return df
+    
+    # Calcola percentili usando rank (0-1)
+    df['percentile_final'] = df['final_score'].rank(pct=True)
+    df['percentile_cumulative'] = df['cumulative_score'].rank(pct=True)
+    df['percentile_max'] = df['max_score'].rank(pct=True)
+    df['percentile_avg'] = df['avg_score'].rank(pct=True)
+    
+    # Composite score = prodotto dei quattro percentili
+    df['composite_score'] = (
+        df['percentile_final'] * 
+        df['percentile_cumulative'] * 
+        df['percentile_max'] *
+        df['percentile_avg']
+    )
     
     return df
 
@@ -123,19 +183,38 @@ def print_summary(df, username):
     print(f"  Avg error rate: {(df['errors'].sum() / df['total_frames'].sum() * 100):.2f}%")
 
 
-def print_top_games(df, n=10):
+def print_top_games(df, n=10, sort_by='composite_score'):
     """Print top N games"""
+    sort_label = {
+        'composite_score': 'composite score',
+        'cumulative_score': 'cumulative score',
+        'final_score': 'final score',
+        'max_score': 'max score'
+    }.get(sort_by, sort_by)
+    
     print(f"\n{'='*60}")
-    print(f"🏆 TOP {n} GAMES (by final score)")
+    print(f"🏆 TOP {n} GAMES (by {sort_label})")
     print(f"{'='*60}\n")
     
-    top = df.nlargest(n, 'final_score')
+    top = df.nlargest(n, sort_by)
     
     for idx, (_, game) in enumerate(top.iterrows(), 1):
-        print(f"{idx:2d}. 🐍 Score: {game['final_score']:3d} "
-              f"(max: {game['max_score']:3d}) | "
-              f"{game['num_frames']:4d} frames ({game['duration_sec']:.0f}s) | "
-              f"{game['start_time_str']}")
+        cumul = game['cumulative_score']
+        comp = game.get('composite_score', 0)
+        
+        # Base info
+        info = f"{idx:2d}. 🐍 "
+        
+        # Se ordinato per composite, mostra composite score prominente
+        if sort_by == 'composite_score':
+            info += f"Composite: {comp:.4f} | "
+            info += f"Final: {game['final_score']:3d}, Max: {game['max_score']:3d}, Cumul: {cumul:,.0f}"
+        else:
+            info += f"Final: {game['final_score']:3d} "
+            info += f"(max: {game['max_score']:3d}, cumul: {cumul:,.0f}, comp: {comp:.4f})"
+        
+        info += f" | {game['num_frames']:4d} frames ({game['duration_sec']:.0f}s) | {game['start_time_str']}"
+        print(info)
 
 
 def print_distribution(df):
@@ -160,6 +239,9 @@ def main():
     parser = argparse.ArgumentParser(description='Analyze Slither.io game sessions')
     parser.add_argument('--user', '-u', default=None, help='Username to analyze (default: all users)')
     parser.add_argument('--best', '-b', type=int, default=10, help='Number of top games to show')
+    parser.add_argument('--sort', '-s', default='composite_score',
+                       choices=['composite_score', 'cumulative_score', 'final_score', 'max_score'],
+                       help='Sort criterion for top games (default: composite_score)')
     parser.add_argument('--export', '-e', action='store_true', help='Export to CSV')
     parser.add_argument('--data-dir', '-d', default='backend/data', help='Data directory')
     
@@ -193,7 +275,7 @@ def main():
         if df is not None:
             all_games.append(df)
             print_summary(df, username)
-            print_top_games(df, args.best)
+            print_top_games(df, args.best, args.sort)
             print_distribution(df)
             
             if args.export:
