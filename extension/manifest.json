@@ -45,7 +45,7 @@
   
   "web_accessible_resources": [
     {
-      "resources": ["content/injected-script.js"],
+      "resources": ["content/injected-script.js", "content/ai-control.js"],
       "matches": ["*://slither.io/*", "*://slither.com/*"]
     }
   ]

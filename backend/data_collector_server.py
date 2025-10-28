@@ -98,6 +98,11 @@ class SessionData:
         self.zarr_store = None
         self.zarr_group = None
 
+        # Game performance metrics
+        self.cumulative_score = 0.0  # Sum of all snake lengths across frames
+        self.final_score = 0  # Snake length at death/end
+        self.max_score = 0  # Peak snake length achieved
+
         # Statistics
         self.stats = {
             'total_food_seen': 0,
@@ -188,6 +193,13 @@ class SessionData:
             metadata = frame_data['metadata']
             debug = frame_data.get('debug', {})
 
+            # Update score tracking using snake length from metadata (more reliable)
+            current_score = metadata.get('snakeLength', 0)
+            if current_score > 0:
+                self.cumulative_score += current_score
+                self.final_score = current_score
+                self.max_score = max(self.max_score, current_score)
+
             # Update averages
             n = self.valid_frames
             self.stats['avg_velocity'] = ((n - 1) * self.stats['avg_velocity'] + metadata['velocity']) / n
@@ -265,6 +277,12 @@ class SessionData:
             self.zarr_group.attrs['frames_written'] = end_idx
             self.zarr_group.attrs['last_update'] = time.time()
             self.zarr_group.attrs['stats'] = self.stats
+            
+            # Update performance metrics in real-time (not just at finalize)
+            self.zarr_group.attrs['cumulative_score'] = float(self.cumulative_score)
+            self.zarr_group.attrs['final_score'] = int(self.final_score)
+            self.zarr_group.attrs['max_score'] = int(self.max_score)
+            self.zarr_group.attrs['valid_frames'] = self.valid_frames
 
             logger.info(f"Flushed {batch_size} frames to storage for session {self.session_id}")
 
@@ -278,9 +296,9 @@ class SessionData:
 
     def _init_zarr_storage(self):
         """Initialize Zarr storage for this session"""
-        # Create user-specific directory structure: data/username/session_timestamp/
+        # Create user-specific directory structure: data/username/game_timestamp/
         user_dir = CONFIG['DATA_DIR'] / self.username
-        session_dir = user_dir / f"session_{self.session_id}"
+        session_dir = user_dir / f"game_{self.session_id}"
         session_dir.mkdir(parents=True, exist_ok=True)
         
         # Save session metadata
@@ -349,6 +367,7 @@ class SessionData:
 
             # Store session metadata
             self.zarr_group.attrs['session_id'] = self.session_id
+            self.zarr_group.attrs['username'] = self.username
             self.zarr_group.attrs['start_time'] = self.start_time
             self.zarr_group.attrs['config'] = CONFIG
             self.zarr_group.attrs['frames_written'] = 0
@@ -377,13 +396,21 @@ class SessionData:
             self.flush_buffer()
 
         if self.zarr_group:
+            # Save end time and performance metrics
             self.zarr_group.attrs['end_time'] = time.time()
             self.zarr_group.attrs['final_stats'] = self.stats
             self.zarr_group.attrs['frame_count'] = self.frame_count
             self.zarr_group.attrs['valid_frames'] = self.valid_frames
             self.zarr_group.attrs['errors'] = self.errors
+            
+            # Game performance metrics
+            self.zarr_group.attrs['cumulative_score'] = float(self.cumulative_score)
+            self.zarr_group.attrs['final_score'] = int(self.final_score)
+            self.zarr_group.attrs['max_score'] = int(self.max_score)
+            self.zarr_group.attrs['avg_score'] = float(self.cumulative_score / max(1, self.valid_frames))
 
-        logger.info(f"Session {self.session_id} finalized with {self.valid_frames} valid frames")
+        logger.info(f"Session {self.session_id} finalized: {self.valid_frames} frames, "
+                   f"final_score={self.final_score}, max_score={self.max_score}")
 
 
 # ===========================================

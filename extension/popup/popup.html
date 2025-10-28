@@ -202,6 +202,31 @@
         <label for="debugMode">Debug mode</label>
     </div>
     
+    <!-- AI Control Section -->
+    <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2);">
+        <label style="font-size: 14px; font-weight: 600;">🤖 AI Control (ESN)</label>
+    </div>
+    
+    <div class="checkbox-group">
+        <input type="checkbox" id="aiEnabled">
+        <label for="aiEnabled">Enable AI Control</label>
+    </div>
+    
+    <div class="form-group">
+        <label for="aiServerUrl">AI Server WebSocket URL</label>
+        <input type="text" id="aiServerUrl" placeholder="ws://127.0.0.1:8765">
+    </div>
+    
+    <div class="checkbox-group">
+        <input type="checkbox" id="aiAutoStart">
+        <label for="aiAutoStart">Auto-start AI when game starts</label>
+    </div>
+    
+    <button id="aiConnect" class="button button-secondary" style="display: none;">Connect to AI</button>
+    <button id="aiDisconnect" class="button button-secondary" style="display: none;">Disconnect AI</button>
+    <button id="aiStartControl" class="button button-primary" style="display: none;">Start AI Control</button>
+    <button id="aiStopControl" class="button button-secondary" style="display: none;">Stop AI Control</button>
+    
     <!-- Action Buttons -->
     <button id="saveSettings" class="button button-primary">Save Settings</button>
     <button id="testConnection" class="button button-secondary">Test Connection</button>
@@ -220,6 +245,14 @@
         <div class="status-item">
             <span class="status-label">Collection:</span>
             <span id="collectionStatus" class="status-value">Stopped</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">AI Status:</span>
+            <span id="aiStatus" class="status-value">Disconnected</span>
+        </div>
+        <div class="status-item" id="aiLatencyItem" style="display: none;">
+            <span class="status-label">AI Latency:</span>
+            <span id="aiLatency" class="status-value">-</span>
         </div>
     </div>
     

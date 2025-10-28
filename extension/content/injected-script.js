@@ -28,10 +28,12 @@
     let gameState = {
         gameRadius: null,
         isActive: false,
+        wasAlive: false,  // Track if snake was alive in previous check
         sessionId: null,
         frameCount: 0,
         validFrames: 0,
-        errors: 0
+        errors: 0,
+        isAIControlled: false  // Track if AI is controlling
     };
     
     let samplingState = {
@@ -250,6 +252,13 @@
             const distanceToCenter = Math.hypot(mySnake.xx - centerX, mySnake.yy - centerY);
             const distanceToBorder = Math.max(0, gameRadius - distanceToCenter);
             
+            // Log heading ogni 50 frame per debug
+            if (CONFIG.DEBUG_LOG && gameState.frameCount % 50 === 1) {
+                console.log('[Slither Injected] Current heading:', 
+                    (mySnake.ang * 180 / Math.PI).toFixed(2) + '°',
+                    '(' + mySnake.ang.toFixed(3) + ' rad)');
+            }
+            
             const grid = createPolarGrid();
             let foodCount = 0, snakeData = { enemySegments: 0, mySegments: 0, enemyHeads: 0 };
             
@@ -269,12 +278,23 @@
                 console.log('[Slither Injected] Sending data package, foods:', foodCount, 'snakes:', snakeData);
             }
             
+            // Check if AI is controlling (either from flag or directly from AIControl)
+            const isAIActive = gameState.isAIControlled || 
+                              (window.AIControl && window.AIControl.isControlling && window.AIControl.isControlling());
+            
+            // Use AI_bot username if AI is controlling, otherwise use configured username or 'anonymous'
+            const username = isAIActive ? 'AI_bot' : (CONFIG.USERNAME || 'anonymous');
+            
+            if (CONFIG.DEBUG_LOG && gameState.frameCount % 100 === 1) {
+                console.log('[Slither Injected] Username:', username, '| AI Active:', isAIActive);
+            }
+            
             const dataPackage = {
                 timestamp: now,
                 sessionId: gameState.sessionId,
                 frameIndex: gameState.frameCount,
                 deltaTime: deltaTime,
-                username: CONFIG.USERNAME,
+                username: username,
                 
                 grid: Array.from(grid),
                 gridMeta: {
@@ -319,6 +339,11 @@
                 type: 'SLITHER_DATA_FRAME',
                 frame: dataPackage
             }, '*');
+            
+            // Send to AI Control if available and active
+            if (window.AIControl && window.AIControl.isControlling()) {
+                window.AIControl.sendFrame(dataPackage);
+            }
             
             gameState.validFrames++;
             samplingState.lastSampleTime = now;
@@ -384,8 +409,39 @@
     }
     
     function checkGameState() {
+        const snake = getMySnake();
+        const isAliveNow = !!(window.ws && window.ws.readyState === 1 && snake);
+        
+        // Detect new game start (respawn)
+        if (isAliveNow && !gameState.wasAlive) {
+            // Snake just spawned! Create new game session
+            if (samplingState.isCollecting) {
+                console.log('[Slither Injected] 🎮 New game detected, starting new session');
+                
+                // Create new session ID for this game
+                gameState.sessionId = Date.now().toString();
+                gameState.frameCount = 0;
+                gameState.validFrames = 0;
+                
+                // Reset EMA channels for new game
+                samplingState.emaChannels = new Float32Array(CONFIG.ANGULAR_BINS * CONFIG.RADIAL_BINS * CONFIG.CHANNELS);
+                
+                // Notify extension
+                window.postMessage({
+                    type: 'SLITHER_STATUS',
+                    status: { 
+                        collecting: true, 
+                        sessionId: gameState.sessionId,
+                        newGame: true 
+                    }
+                }, '*');
+            }
+        }
+        
+        // Update state tracking
+        gameState.wasAlive = isAliveNow;
         const wasActive = gameState.isActive;
-        gameState.isActive = !!(window.ws && window.ws.readyState === 1 && getMySnake());
+        gameState.isActive = isAliveNow;
         
         if (gameState.isActive && !wasActive) {
             // Game just became active
@@ -425,6 +481,14 @@
                 samplingState.isBoosting = event.data.boosting;
                 break;
                 
+            case 'AI_CONTROL_STATUS':
+                // Track AI control state
+                gameState.isAIControlled = event.data.isControlling || false;
+                if (CONFIG.DEBUG_LOG) {
+                    console.log('[Slither Injected] AI control status:', gameState.isAIControlled);
+                }
+                break;
+                
             case 'SLITHER_SEND_DATA':
                 sendDataToBackend(event.data.frame);
                 break;
@@ -440,6 +504,48 @@
                         errors: gameState.errors
                     }
                 }, '*');
+                break;
+                
+            // AI Control messages
+            case 'AI_CONNECT':
+                if (window.AIControl) {
+                    window.AIControl.connect(event.data.serverUrl);
+                }
+                break;
+                
+            case 'AI_DISCONNECT':
+                if (window.AIControl) {
+                    window.AIControl.disconnect();
+                }
+                break;
+                
+            case 'AI_START_CONTROL':
+                if (window.AIControl) {
+                    window.AIControl.start();
+                }
+                break;
+                
+            case 'AI_STOP_CONTROL':
+                if (window.AIControl) {
+                    window.AIControl.stop();
+                }
+                break;
+                
+            case 'AI_SET_DEBUG':
+                if (window.AIControl) {
+                    window.AIControl.setDebugMode(event.data.enabled);
+                }
+                break;
+                
+            case 'AI_GET_STATUS':
+                if (window.AIControl) {
+                    const status = window.AIControl.getStatus();
+                    window.postMessage({
+                        type: 'AI_CONTROL_STATUS',
+                        status: status.isControlling ? 'controlling' : (status.isConnected ? 'connected' : 'disconnected'),
+                        details: status
+                    }, '*');
+                }
                 break;
         }
     });

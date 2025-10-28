@@ -35,6 +35,14 @@ class SlitherDataCollector {
         // Start polling for game state
         this.startGamePolling();
         
+        // Auto-connect AI if enabled
+        if (this.settings.aiEnabled && this.settings.aiServerUrl) {
+            console.log('[Slither Data Collector] AI enabled in settings, connecting...');
+            setTimeout(() => {
+                this.connectAI(this.settings.aiServerUrl);
+            }, 1000); // Wait 1 second for scripts to load
+        }
+        
         console.log('[Slither Data Collector] Initialized successfully');
     }
     
@@ -44,7 +52,10 @@ class SlitherDataCollector {
                 username: 'anonymous',
                 serverHost: 'http://127.0.0.1:5055',
                 autoStart: true,
-                debugMode: false
+                debugMode: false,
+                aiEnabled: false,
+                aiServerUrl: 'ws://127.0.0.1:8765',
+                aiAutoStart: false
             });
             
             // Try to fetch server configuration
@@ -100,6 +111,11 @@ class SlitherDataCollector {
     }
     
     injectCollectionScript() {
+        // Inject AI Control module first
+        const aiControlScript = document.createElement('script');
+        aiControlScript.src = chrome.runtime.getURL('content/ai-control.js');
+        (document.head || document.documentElement).appendChild(aiControlScript);
+        
         // Inject the main data collection script into the page context
         const script = document.createElement('script');
         script.src = chrome.runtime.getURL('content/injected-script.js');
@@ -143,6 +159,12 @@ class SlitherDataCollector {
                 case 'SLITHER_ERROR':
                     this.handleError(event.data.error);
                     break;
+                case 'AI_CONTROL_STATUS':
+                    this.handleAIStatus(event.data.status, event.data.details);
+                    break;
+                case 'AI_CONTROL_ERROR':
+                    this.handleAIError(event.data.error);
+                    break;
             }
         });
         
@@ -174,6 +196,27 @@ class SlitherDataCollector {
                         sendResponse(result);
                     });
                     return true; // Keep channel open for async response
+                case 'AI_CONNECT':
+                    this.connectAI(message.serverUrl);
+                    sendResponse({ success: true });
+                    break;
+                case 'AI_DISCONNECT':
+                    this.disconnectAI();
+                    sendResponse({ success: true });
+                    break;
+                case 'AI_START_CONTROL':
+                    this.startAIControl();
+                    sendResponse({ success: true });
+                    break;
+                case 'AI_STOP_CONTROL':
+                    this.stopAIControl();
+                    sendResponse({ success: true });
+                    break;
+                case 'GET_AI_STATUS':
+                    // Query AI status from injected script
+                    window.postMessage({ type: 'AI_GET_STATUS' }, '*');
+                    sendResponse({ success: true });
+                    break;
             }
         });
     }
@@ -347,6 +390,50 @@ class SlitherDataCollector {
                 type: 'SLITHER_REQUEST_STATUS'
             }, '*');
         }, 1000);
+    }
+    
+    // AI Control Methods
+    connectAI(serverUrl) {
+        window.postMessage({
+            type: 'AI_CONNECT',
+            serverUrl: serverUrl || this.settings.aiServerUrl
+        }, '*');
+    }
+    
+    disconnectAI() {
+        window.postMessage({
+            type: 'AI_DISCONNECT'
+        }, '*');
+    }
+    
+    startAIControl() {
+        window.postMessage({
+            type: 'AI_START_CONTROL'
+        }, '*');
+    }
+    
+    stopAIControl() {
+        window.postMessage({
+            type: 'AI_STOP_CONTROL'
+        }, '*');
+    }
+    
+    handleAIStatus(status, details) {
+        console.log('[Slither Data Collector] AI Status:', status, details);
+        // Forward to popup if needed
+        chrome.runtime.sendMessage({
+            type: 'AI_STATUS_UPDATE',
+            status: status,
+            details: details
+        }).catch(() => {}); // Ignore if popup is closed
+    }
+    
+    handleAIError(error) {
+        console.error('[Slither Data Collector] AI Error:', error);
+        chrome.runtime.sendMessage({
+            type: 'AI_ERROR',
+            error: error
+        }).catch(() => {});
     }
 }
 

@@ -9,6 +9,9 @@ class PopupController {
         await this.loadSettings();
         this.bindEvents();
         this.startStatusUpdates();
+        
+        // Query AI status immediately after init
+        setTimeout(() => this.queryAIStatus(), 100);
     }
     
     async loadSettings() {
@@ -17,9 +20,13 @@ class PopupController {
                 username: '',
                 serverHost: 'http://127.0.0.1:5055',
                 autoStart: true,
-                debugMode: true  // Enable debug by default for testing
+                debugMode: true,  // Enable debug by default for testing
+                aiEnabled: false,
+                aiServerUrl: 'ws://127.0.0.1:8765',
+                aiAutoStart: false
             });
             
+            // Load basic settings
             document.getElementById('username').value = settings.username;
             document.getElementById('serverHost').value = settings.serverHost;
             
@@ -29,8 +36,36 @@ class PopupController {
             if (document.getElementById('debugMode')) {
                 document.getElementById('debugMode').checked = settings.debugMode;
             }
+            
+            // Load AI settings
+            if (document.getElementById('aiEnabled')) {
+                document.getElementById('aiEnabled').checked = settings.aiEnabled;
+                this.updateAIControls(settings.aiEnabled);
+            }
+            if (document.getElementById('aiServerUrl')) {
+                document.getElementById('aiServerUrl').value = settings.aiServerUrl;
+            }
+            if (document.getElementById('aiAutoStart')) {
+                document.getElementById('aiAutoStart').checked = settings.aiAutoStart;
+            }
+            
+            console.log('[Popup] Settings loaded:', settings);
         } catch (error) {
             console.error('Error loading settings:', error);
+        }
+    }
+    
+    async queryAIStatus() {
+        try {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
+                // The content script will send back AI status if available
+                chrome.tabs.sendMessage(tab.id, {
+                    type: 'GET_AI_STATUS'
+                }).catch(() => {}); // Ignore if not ready
+            }
+        } catch (error) {
+            // Ignore errors - page might not be ready
         }
     }
     
@@ -52,6 +87,46 @@ class PopupController {
                 setTimeout(() => this.testConnection(), 300);
             }
         });
+        
+        // AI Control checkbox - save immediately when changed
+        document.getElementById('aiEnabled').addEventListener('change', async (e) => {
+            const isEnabled = e.target.checked;
+            this.updateAIControls(isEnabled);
+            
+            // Save aiEnabled immediately
+            try {
+                await chrome.storage.sync.set({ aiEnabled: isEnabled });
+                console.log('[Popup] AI Enabled saved:', isEnabled);
+            } catch (error) {
+                console.error('[Popup] Error saving aiEnabled:', error);
+            }
+        });
+        
+        // AI Control buttons
+        document.getElementById('aiConnect').addEventListener('click', () => {
+            this.connectAI();
+        });
+        
+        document.getElementById('aiDisconnect').addEventListener('click', () => {
+            this.disconnectAI();
+        });
+        
+        document.getElementById('aiStartControl').addEventListener('click', () => {
+            this.startAIControl();
+        });
+        
+        document.getElementById('aiStopControl').addEventListener('click', () => {
+            this.stopAIControl();
+        });
+        
+        // Listen for AI status updates
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (message.type === 'AI_STATUS_UPDATE') {
+                this.updateAIStatus(message.status, message.details);
+            } else if (message.type === 'AI_ERROR') {
+                this.showStatus('error', 'AI Error: ' + message.error);
+            }
+        });
     }
     
     async saveSettings() {
@@ -59,7 +134,10 @@ class PopupController {
             username: document.getElementById('username').value.trim(),
             serverHost: document.getElementById('serverHost').value.trim(),
             autoStart: document.getElementById('autoStart') ? document.getElementById('autoStart').checked : true,
-            debugMode: document.getElementById('debugMode') ? document.getElementById('debugMode').checked : false
+            debugMode: document.getElementById('debugMode') ? document.getElementById('debugMode').checked : false,
+            aiEnabled: document.getElementById('aiEnabled') ? document.getElementById('aiEnabled').checked : false,
+            aiServerUrl: document.getElementById('aiServerUrl') ? document.getElementById('aiServerUrl').value.trim() : 'ws://127.0.0.1:8765',
+            aiAutoStart: document.getElementById('aiAutoStart') ? document.getElementById('aiAutoStart').checked : false
         };
         
         // Validate settings
@@ -85,6 +163,11 @@ class PopupController {
                         type: 'UPDATE_SETTINGS',
                         settings: settings
                     });
+                    
+                    // If AI is enabled and we have a URL, show connect button
+                    if (settings.aiEnabled && settings.aiServerUrl) {
+                        this.updateAIControls(true);
+                    }
                 } catch (error) {
                     console.log('Content script not ready yet, settings saved to storage');
                 }
@@ -270,21 +353,153 @@ class PopupController {
     }
     
     startStatusUpdates() {
-        // Update status immediately
+        // Initial update
         this.updateStatus();
         
-        // Update status every 2 seconds
-        setInterval(() => {
-            this.updateStatus();
-        }, 2000);
+        // Update every 2 seconds
+        setInterval(() => this.updateStatus(), 2000);
+    }
+    
+    // AI Control Methods
+    updateAIControls(enabled) {
+        const aiServerUrl = document.getElementById('aiServerUrl');
+        const aiAutoStart = document.getElementById('aiAutoStart');
+        const aiConnect = document.getElementById('aiConnect');
+        const aiDisconnect = document.getElementById('aiDisconnect');
+        const aiStartControl = document.getElementById('aiStartControl');
+        const aiStopControl = document.getElementById('aiStopControl');
         
-        // Auto-test connection on load
-        setTimeout(() => {
-            const host = document.getElementById('serverHost').value.trim();
-            if (host) {
-                this.testConnection();
+        if (enabled) {
+            aiServerUrl.style.display = 'block';
+            aiServerUrl.parentElement.style.display = 'block';
+            aiAutoStart.parentElement.style.display = 'flex';
+            aiConnect.style.display = 'block';
+        } else {
+            aiServerUrl.parentElement.style.display = 'none';
+            aiAutoStart.parentElement.style.display = 'none';
+            aiConnect.style.display = 'none';
+            aiDisconnect.style.display = 'none';
+            aiStartControl.style.display = 'none';
+            aiStopControl.style.display = 'none';
+        }
+    }
+    
+    async connectAI() {
+        const aiServerUrl = document.getElementById('aiServerUrl').value.trim();
+        
+        if (!aiServerUrl) {
+            this.showStatus('error', 'Please enter AI server URL');
+            return;
+        }
+        
+        try {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    type: 'AI_CONNECT',
+                    serverUrl: aiServerUrl
+                });
+                this.showStatus('success', 'Connecting to AI server...');
+            } else {
+                this.showStatus('error', 'Please open slither.io first');
             }
-        }, 1000);
+        } catch (error) {
+            console.error('Error connecting to AI:', error);
+            this.showStatus('error', 'Failed to connect to AI');
+        }
+    }
+    
+    async disconnectAI() {
+        try {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    type: 'AI_DISCONNECT'
+                });
+                this.showStatus('success', 'Disconnected from AI');
+            }
+        } catch (error) {
+            console.error('Error disconnecting from AI:', error);
+        }
+    }
+    
+    async startAIControl() {
+        try {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    type: 'AI_START_CONTROL'
+                });
+                this.showStatus('success', 'AI Control started!');
+            }
+        } catch (error) {
+            console.error('Error starting AI control:', error);
+            this.showStatus('error', 'Failed to start AI control');
+        }
+    }
+    
+    async stopAIControl() {
+        try {
+            const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+            if (tab && (tab.url.includes('slither.io') || tab.url.includes('slither.com'))) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    type: 'AI_STOP_CONTROL'
+                });
+                this.showStatus('success', 'AI Control stopped');
+            }
+        } catch (error) {
+            console.error('Error stopping AI control:', error);
+        }
+    }
+    
+    updateAIStatus(status, details) {
+        const aiStatusEl = document.getElementById('aiStatus');
+        const aiLatencyItem = document.getElementById('aiLatencyItem');
+        const aiLatencyEl = document.getElementById('aiLatency');
+        
+        const aiConnect = document.getElementById('aiConnect');
+        const aiDisconnect = document.getElementById('aiDisconnect');
+        const aiStartControl = document.getElementById('aiStartControl');
+        const aiStopControl = document.getElementById('aiStopControl');
+        
+        switch (status) {
+            case 'connected':
+                aiStatusEl.textContent = 'Connected';
+                aiStatusEl.style.color = '#4CAF50';
+                aiConnect.style.display = 'none';
+                aiDisconnect.style.display = 'block';
+                aiStartControl.style.display = 'block';
+                aiStopControl.style.display = 'none';
+                break;
+                
+            case 'ready':
+                aiStatusEl.textContent = 'Ready';
+                aiStatusEl.style.color = '#4CAF50';
+                aiStartControl.style.display = 'block';
+                break;
+                
+            case 'controlling':
+                aiStatusEl.textContent = '🤖 AI Controlling';
+                aiStatusEl.style.color = '#10b981';
+                aiStartControl.style.display = 'none';
+                aiStopControl.style.display = 'block';
+                
+                if (details && details.avgLatency > 0) {
+                    aiLatencyItem.style.display = 'flex';
+                    aiLatencyEl.textContent = details.avgLatency.toFixed(0) + ' ms';
+                }
+                break;
+                
+            case 'disconnected':
+                aiStatusEl.textContent = 'Disconnected';
+                aiStatusEl.style.color = '#f44336';
+                aiConnect.style.display = 'block';
+                aiDisconnect.style.display = 'none';
+                aiStartControl.style.display = 'none';
+                aiStopControl.style.display = 'none';
+                aiLatencyItem.style.display = 'none';
+                break;
+        }
     }
 }
 
