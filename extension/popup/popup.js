@@ -326,6 +326,29 @@ class PopupController {
     
     async updateStatus() {
         try {
+            // Check backend connection status
+            const serverHost = document.getElementById('serverHost').value.trim() || 'http://127.0.0.1:5055';
+            try {
+                const healthResponse = await fetch(`${serverHost}/health`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    cache: 'no-cache',
+                    signal: AbortSignal.timeout(2000) // 2 second timeout
+                });
+                
+                if (healthResponse.ok) {
+                    document.getElementById('connectionStatus').textContent = 'Connected';
+                    document.getElementById('connectionStatus').style.color = '#4CAF50';
+                } else {
+                    document.getElementById('connectionStatus').textContent = 'Error';
+                    document.getElementById('connectionStatus').style.color = '#FFC107';
+                }
+            } catch (error) {
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').style.color = '#f44336';
+            }
+            
+            // Check game status
             const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
             if (!tab || (!tab.url.includes('slither.io') && !tab.url.includes('slither.com'))) {
                 document.getElementById('gameStatus').textContent = 'Not on Slither.io';

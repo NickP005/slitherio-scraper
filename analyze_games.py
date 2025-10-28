@@ -112,14 +112,13 @@ def analyze_user_games(username, data_dir='backend/data'):
 
 def calculate_composite_score(df):
     """
-    Calcola un composite score basato su percentili per final, cumulative, max e average score.
+    Calcola un composite score basato su percentili per final, cumulative e max score.
     
     Per ogni gioco calcola:
     - percentile_final (0-1): posizione rispetto agli altri per final_score
     - percentile_cumulative (0-1): posizione per cumulative_score
     - percentile_max (0-1): posizione per max_score
-    - percentile_avg (0-1): posizione per avg_score (incentiva media alta)
-    - composite_score = percentile_final * percentile_cumulative * percentile_max * percentile_avg
+    - composite_score = percentile_final * percentile_cumulative * percentile_max
     
     Il miglior gioco ha composite_score = 1 (tutti i percentili a 1)
     Il peggior gioco ha composite_score vicino a 0
@@ -131,7 +130,6 @@ def calculate_composite_score(df):
         df['percentile_final'] = 1.0
         df['percentile_cumulative'] = 1.0
         df['percentile_max'] = 1.0
-        df['percentile_avg'] = 1.0
         df['composite_score'] = 1.0
         return df
     
@@ -139,14 +137,12 @@ def calculate_composite_score(df):
     df['percentile_final'] = df['final_score'].rank(pct=True)
     df['percentile_cumulative'] = df['cumulative_score'].rank(pct=True)
     df['percentile_max'] = df['max_score'].rank(pct=True)
-    df['percentile_avg'] = df['avg_score'].rank(pct=True)
     
-    # Composite score = prodotto dei quattro percentili
+    # Composite score = prodotto dei tre percentili
     df['composite_score'] = (
         df['percentile_final'] * 
         df['percentile_cumulative'] * 
-        df['percentile_max'] *
-        df['percentile_avg']
+        df['percentile_max']
     )
     
     return df

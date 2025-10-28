@@ -53,14 +53,13 @@ def get_game_metadata(game_path):
 
 def calculate_composite_score(games):
     """
-    Calcola un composite score basato su percentili per final, cumulative, max e average score.
+    Calcola un composite score basato su percentili per final, cumulative e max score.
     
     Per ogni gioco calcola:
     - percentile_final (0-1): posizione rispetto agli altri per final_score
     - percentile_cumulative (0-1): posizione per cumulative_score
     - percentile_max (0-1): posizione per max_score
-    - percentile_avg (0-1): posizione per avg_score (incentiva media alta)
-    - composite_score = percentile_final * percentile_cumulative * percentile_max * percentile_avg
+    - composite_score = percentile_final * percentile_cumulative * percentile_max
     
     Il miglior gioco ha composite_score = 1 (tutti i percentili a 1)
     Il peggior gioco ha composite_score vicino a 0
@@ -72,7 +71,6 @@ def calculate_composite_score(games):
     final_scores = np.array([g['metadata'].get('final_score', 0) for g in games])
     cumulative_scores = np.array([g['metadata'].get('cumulative_score', 0) for g in games])
     max_scores = np.array([g['metadata'].get('max_score', 0) for g in games])
-    avg_scores = np.array([g['metadata'].get('avg_score', 0) for g in games])
     
     # Calcola percentili (rankdata da scipy.stats o implementazione manuale)
     def percentile_rank(scores):
@@ -94,16 +92,14 @@ def calculate_composite_score(games):
     percentiles_final = percentile_rank(final_scores)
     percentiles_cumulative = percentile_rank(cumulative_scores)
     percentiles_max = percentile_rank(max_scores)
-    percentiles_avg = percentile_rank(avg_scores)
     
     # Calcola composite score (prodotto dei percentili)
     for i, game in enumerate(games):
         game['percentile_final'] = float(percentiles_final[i])
         game['percentile_cumulative'] = float(percentiles_cumulative[i])
         game['percentile_max'] = float(percentiles_max[i])
-        game['percentile_avg'] = float(percentiles_avg[i])
         game['composite_score'] = float(
-            percentiles_final[i] * percentiles_cumulative[i] * percentiles_max[i] * percentiles_avg[i]
+            percentiles_final[i] * percentiles_cumulative[i] * percentiles_max[i]
         )
     
     return games
@@ -317,7 +313,6 @@ def main():
     print(f"      Final: {best['metadata'].get('final_score', 0)} (percentile: {best['percentile_final']:.3f})")
     print(f"      Cumulative: {best['metadata'].get('cumulative_score', 0):,.0f} (percentile: {best['percentile_cumulative']:.3f})")
     print(f"      Max: {best['metadata'].get('max_score', 0)} (percentile: {best['percentile_max']:.3f})")
-    print(f"      Average: {best['metadata'].get('avg_score', 0):.1f} (percentile: {best['percentile_avg']:.3f})")
     print(f"      Composite: {best['composite_score']:.4f}")
     
     # Raggruppa per username

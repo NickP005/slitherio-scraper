@@ -304,7 +304,7 @@ class SlitherDataCollector {
         };
         
         window.postMessage({
-            type: 'SLITHER_UPDATE_CONFIG',
+            type: 'SLITHER_CONFIG_UPDATE',
             config: config
         }, '*');
     }

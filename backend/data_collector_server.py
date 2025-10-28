@@ -377,7 +377,9 @@ class SessionData:
             self.zarr_group.attrs['session_id'] = self.session_id
             self.zarr_group.attrs['username'] = self.username
             self.zarr_group.attrs['start_time'] = self.start_time
-            self.zarr_group.attrs['config'] = CONFIG
+            # Convert CONFIG to JSON-serializable format (convert Path to string)
+            config_serializable = {k: str(v) if isinstance(v, Path) else v for k, v in CONFIG.items()}
+            self.zarr_group.attrs['config'] = config_serializable
             self.zarr_group.attrs['frames_written'] = 0
 
             logger.info(f"Initialized Zarr storage for session {self.session_id}")
